@@ -72,7 +72,7 @@ public class FileItemHelper {
 	/**
 	 * Create a fileitem from the given file.
 	 */
-	public FileItem createFileItem(File file){
+	public static FileItem createFileItem(File file){
 		FileItem item = new FileItem();
 		item.setName(file.getName());
 		item.setPath(file.getAbsolutePath());
@@ -106,7 +106,7 @@ public class FileItemHelper {
 	/**
 	 * Checks the mime-type of the file to see if it is an image.
 	 */
-	public boolean isImage(FileItem item){
+	public static boolean isImage(FileItem item){
 		if (item.getIsDirectory()){
 			return false;
 		}
@@ -121,7 +121,7 @@ public class FileItemHelper {
 	/**
 	 * Returns the mime type of the given item.
 	 */
-	public String getImageMimeType(FileItem item){
+	public static String getImageMimeType(FileItem item){
 		String mime = "";
 		try {
 			mime = URLConnection.guessContentTypeFromName(item.getPath());

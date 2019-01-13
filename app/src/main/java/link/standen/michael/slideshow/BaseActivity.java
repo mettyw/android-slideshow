@@ -24,7 +24,6 @@ import link.standen.michael.slideshow.model.FileItem;
 public abstract class BaseActivity extends AppCompatActivity {
 
 	String currentPath;
-	List<FileItem> fileList = new ArrayList<>();
 	private Dialog changeLog;
 
 	private static final String CHANGE_LOG_CSS = "body { padding: 0.8em; } " +

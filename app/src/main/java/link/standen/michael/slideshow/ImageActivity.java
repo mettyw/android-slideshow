@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.BitmapFactory;
+import android.media.ExifInterface;
 import android.os.Build;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
@@ -27,10 +28,12 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Collections;
 
 import link.standen.michael.slideshow.listener.OnSwipeTouchListener;
 import link.standen.michael.slideshow.model.FileItem;
+import link.standen.michael.slideshow.model.FileListHandler;
 import link.standen.michael.slideshow.strategy.image.CustomImageStrategy;
 import link.standen.michael.slideshow.strategy.image.GlideImageStrategy;
 import link.standen.michael.slideshow.strategy.image.ImageStrategy;
@@ -43,21 +46,17 @@ import link.standen.michael.slideshow.util.FileItemHelper;
 public class ImageActivity extends BaseActivity implements ImageStrategy.ImageStrategyCallback {
 
 	private static final String TAG = ImageActivity.class.getName();
+	private final FileListHandler fileListHandler = new FileListHandler(this);
 
 	private boolean blockPreferenceReload = false;
 
 	private SharedPreferences preferences;
 	private ImageStrategy imageStrategy;
 
-	private int imagePosition;
-	private int firstImagePosition;
-
 	private boolean isRunning = false;
 	private boolean inPipMode = false;
 
 	private static boolean STOP_ON_COMPLETE;
-	private static boolean REVERSE_ORDER;
-	private static boolean RANDOM_ORDER;
 	private static int SLIDESHOW_DELAY;
 	private static boolean IMAGE_DETAILS;
 	private static boolean IMAGE_DETAILS_DURING;
@@ -81,7 +80,7 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 		public void run() {
 			if (isLoading) {
 				// Show snack bar with filename and option to skip
-				String path = fileList.get(imagePosition).getPath();
+				String path = fileListHandler.getCurrentImage().getPath();
 				if (path.length() > LOCATION_DETAIL_MAX_LENGTH){
 					path = "..." + path.substring(path.length() - (LOCATION_DETAIL_MAX_LENGTH - 3));
 				}
@@ -113,7 +112,7 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 		@Override
 		public void run() {
 			followingImage(false);
-			if (STOP_ON_COMPLETE && imagePosition == firstImagePosition && !inPipMode) {
+			if (STOP_ON_COMPLETE && fileListHandler.isPositionFirst() && !inPipMode) {
 				show();
 			}
 		}
@@ -280,6 +279,7 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 
 		// Get starting values
 		currentPath = getIntent().getStringExtra("currentPath");
+		//FIXME when is StringExtra this set?
 		String imagePath = getIntent().getStringExtra("imagePath");
 		boolean autoStart = getIntent().getBooleanExtra("autoStart", false);
 		Log.i(TAG, String.format("Starting slideshow at %s %s", currentPath, imagePath));
@@ -289,9 +289,18 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 		editor.putString("remembered_image", imagePath);
 		editor.apply();
 
-		// Set up image list
-		fileList = new FileItemHelper(this).getFileList(currentPath, false, imagePath == null);
-		if (fileList.size() == 0){
+		if (autoStart){
+			// Auto start from last image
+			imagePath = preferences.getString("remembered_image_current", null);
+			Log.d(TAG, String.format("Remembered start location: %s", imagePath));
+		}
+
+		// Load the image list
+		//FIXME why add subdirectorires when imagePath was set previously by StringExtra?
+
+		//fileListHandler.load(new FileItemHelper(this).getFileList(currentPath, false, imagePath == null));
+		fileListHandler.setBaseDir(currentPath);
+		if (fileListHandler.getSize() == 0){
 			// No files to view. Exit
 			Log.i(TAG, "No files in list.");
 			Toast.makeText(this, R.string.toast_no_files, Toast.LENGTH_SHORT).show();
@@ -299,34 +308,10 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 			return;
 		}
 
-		if (RANDOM_ORDER){
-			Collections.shuffle(fileList);
-		}
-
-		if (autoStart){
-			// Auto start from last image
-			imagePath = preferences.getString("remembered_image_current", null);
-			Log.d(TAG, String.format("Remembered start location: %s", imagePath));
-		}
-		// Find the selected image position
-		if (imagePath == null) {
-			imagePosition = 0;
-			nextImage(true, true);
-		} else {
-			for (int i = 0; i < fileList.size(); i++) {
-				if (imagePath.equals(fileList.get(i).getPath())) {
-					imagePosition = i;
-					break;
-				}
-			}
-		}
-		firstImagePosition = imagePosition;
-
-		Log.v(TAG, String.format("First item is at index: %s", imagePosition));
-		Log.v(TAG, String.format("File list has size of: %s", fileList.size()));
-
+		// Find the selected image position or set to first
+		fileListHandler.setPositionFromLastImage(imagePath);
 		// Show the first image
-		loadImage(imagePosition, false);
+		loadImage(fileListHandler.getCurrentImage(), false);
 	}
 
 	/**
@@ -376,7 +361,7 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 		} else {
 			show();
 			// Force reloading image at full dimensions
-			loadImage(imagePosition, false);
+			loadImage(fileListHandler.getCurrentImage(), false);
 		}
 	}
 
@@ -428,8 +413,6 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 		// Load preferences
 		SLIDESHOW_DELAY = (int) (Float.parseFloat(preferences.getString("slide_delay", "3")) * 1000);
 		STOP_ON_COMPLETE = preferences.getBoolean("stop_on_complete", false);
-		REVERSE_ORDER = preferences.getBoolean("reverse_order", false);
-		RANDOM_ORDER = preferences.getBoolean("random_order", false);
 		IMAGE_DETAILS = preferences.getBoolean("image_details", false);
 		IMAGE_DETAILS_DURING = preferences.getBoolean("image_details_during", false);
 		SKIP_LONG_LOAD = preferences.getBoolean("skip_long_load", false);
@@ -455,37 +438,25 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 		imageStrategy.setCallback(this);
 		imageStrategy.loadPreferences(preferences);
 
+        fileListHandler.loadPreferences(preferences);
 	}
 
 	/**
 	 * Show the next image.
 	 */
 	private void nextImage(boolean forwards, boolean preload){
-		if (preload && !PRELOAD_IMAGES){
+		if (preload && !ImageActivity.PRELOAD_IMAGES) {
 			// Stop
 			return;
 		}
-
-		int current = imagePosition;
-		int newPosition = imagePosition;
-		do {
-			newPosition += forwards ? 1 : -1;
-			if (newPosition < 0){
-				newPosition = fileList.size() - 1;
-			}
-			if (newPosition >= fileList.size()){
-				newPosition = 0;
-			}
-			if (newPosition == current){
-				// Looped. Exit
-				onBackPressed();
-				return;
-			}
-		} while (!testPositionIsImage(newPosition));
-		if (!preload){
-			imagePosition = newPosition;
+		FileItem image = fileListHandler.nextImage(forwards, preload);
+		if ( fileListHandler.isPositionLast() ) {
+			// FIXME
+			// Looped. Exit
+			this.onBackPressed();
+			return;
 		}
-		loadImage(newPosition, preload);
+		this.loadImage(image, preload);
 	}
 
 	/**
@@ -493,15 +464,7 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 	 * This method handles whether or not the slideshow is in reverse order.
 	 */
 	private void followingImage(boolean preload){
-		nextImage(!REVERSE_ORDER, preload);
-	}
-
-	/**
-	 * Tests if the current file item is an image.
-	 * @return True if image, false otherwise.
-     */
-	private boolean testPositionIsImage(int position){
-		return new FileItemHelper(this).isImage(fileList.get(position));
+		nextImage(true, preload);
 	}
 
 	@Override
@@ -525,15 +488,13 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 	/**
 	 * Load the image to the screen.
 	 */
-	private void loadImage(int position, boolean preload){
+	private void loadImage(FileItem item, boolean preload){
 		if (preload && !PRELOAD_IMAGES){
 			// Stop
 			return;
 		}
 
 		try {
-		final FileItem item = fileList.get(position);
-
 			if (preload) {
 				imageStrategy.preload(item);
 			} else {
@@ -557,7 +518,7 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 			loadPreferences();
 		}
 		SharedPreferences.Editor editor = preferences.edit();
-		editor.putString("remembered_image_current", fileList.get(imagePosition).getPath());
+		editor.putString("remembered_image_current", fileListHandler.getCurrentImage().getPath());
 		editor.apply();
 	}
 
@@ -576,10 +537,11 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 		File file = new File(item.getPath());
 
 		// Location
-		String location = file.getParent().replace(getRootLocation(), "");
+		String location = file.getParent().replace(getRootLocation(), "...") + File.separator + file.getName();
 		if (location.length() > LOCATION_DETAIL_MAX_LENGTH){
 			location = "..." + location.substring(location.length() - (LOCATION_DETAIL_MAX_LENGTH - 3));
 		}
+
 		((TextView)findViewById(R.id.image_detail_location1)).setText(location);
 		((TextView)findViewById(R.id.image_detail_location2)).setText(location);
 		// Dimensions
@@ -632,12 +594,11 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 	 * Delete the current image
 	 */
 	private void doDelete(){
-		FileItem item = fileList.get(imagePosition);
+		FileItem item = fileListHandler.getCurrentImage();
 		if (new File(item.getPath()).delete()) {
-			fileList.remove(item);
+			fileListHandler.removeCurrentImage();
 			Toast.makeText(ImageActivity.this, R.string.image_deleted, Toast.LENGTH_SHORT).show();
 			// Show next image
-			imagePosition = imagePosition + (REVERSE_ORDER ? 1 : -1);
 			followingImage(false);
 		} else {
 			Toast.makeText(ImageActivity.this, R.string.image_not_deleted, Toast.LENGTH_SHORT).show();
@@ -648,9 +609,9 @@ public class ImageActivity extends BaseActivity implements ImageStrategy.ImageSt
 	 * Share the current image
 	 */
 	private void shareImage(){
-		FileItem item = fileList.get(imagePosition);
+		FileItem item = fileListHandler.getCurrentImage();
 		Intent intent = new Intent(Intent.ACTION_SEND);
-		String mime = new FileItemHelper(this).getImageMimeType(item);
+		String mime = FileItemHelper.getImageMimeType(item);
 		intent.setType(mime);
 		intent.putExtra(Intent.EXTRA_STREAM, FileProvider.getUriForFile(this,
 				getApplicationContext().getPackageName() + ".provider",

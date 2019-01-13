@@ -17,6 +17,7 @@ import android.widget.AdapterView;
 import android.widget.ListView;
 
 import java.io.File;
+import java.util.List;
 
 import link.standen.michael.slideshow.adapter.FileItemArrayAdapter;
 import link.standen.michael.slideshow.model.FileItem;
@@ -106,7 +107,7 @@ public class MainActivity extends BaseActivity {
 	}
 
 	private void updateListView(){
-		fileList = new FileItemHelper(this).getFileList(currentPath);
+		List<FileItem> fileList = new FileItemHelper(this).getFileList(currentPath);
 		FileItemHelper fileItemHelper = new FileItemHelper(this);
 
 		if (currentPath.equals(Environment.getExternalStorageDirectory().getAbsolutePath())) {
