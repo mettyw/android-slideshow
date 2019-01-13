@@ -23,19 +23,34 @@ public class GlideRotateDimenTransformation extends BitmapTransformation {
 	@Override
 	protected Bitmap transform(BitmapPool pool, Bitmap toTransform, int outWidth, int outHeight) {
 		Log.d(TAG, String.format("Height: %d Width: %d", toTransform.getHeight(), toTransform.getWidth()));
-		if (toTransform.getHeight() >= toTransform.getWidth()){
-			// Perform fit center here on un-rotated image.
-			toTransform = TransformationUtils.fitCenter(toTransform, pool, outWidth, outHeight);
-			return toTransform;
+		if ( outWidth <= outHeight) {
+			if (toTransform.getHeight() >= toTransform.getWidth()){
+				// Perform fit center here on un-rotated image.
+				toTransform = TransformationUtils.fitCenter(toTransform, pool, outWidth, outHeight);
+				return toTransform;
+			} else {
+				// Fit center using largest side (width) for both to reduce computation for rotate
+				//noinspection SuspiciousNameCombination
+				toTransform = TransformationUtils.fitCenter(toTransform, pool, outWidth, outWidth);
+				return TransformationUtils.rotateImage(toTransform, 90);
+			}
 		}
-		// Fit center using largest side (width) for both to reduce computation for rotate
-		//noinspection SuspiciousNameCombination
-		toTransform = TransformationUtils.fitCenter(toTransform, pool, outWidth, outWidth);
-		return TransformationUtils.rotateImage(toTransform, 90);
+		else {
+			if (toTransform.getWidth() >= toTransform.getHeight()){
+				// Perform fit center here on un-rotated image.
+				toTransform = TransformationUtils.fitCenter(toTransform, pool, outWidth, outHeight);
+				return toTransform;
+			} else {
+				// Fit center using largest side (height) for both to reduce computation for rotate
+				//noinspection SuspiciousNameCombination
+				toTransform = TransformationUtils.fitCenter(toTransform, pool, outHeight, outHeight);
+				return TransformationUtils.rotateImage(toTransform, 90);
+			}
+		}
 	}
 
 	@Override
 	public String getId() {
-		return TAG;
+		return TAG + Math.random(); //FIXME
 	}
 }
